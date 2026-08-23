@@ -3,7 +3,7 @@
  * Plugin Name:       Hossam Adel Law Firm — Business Listings
  * Plugin URI:        https://hossamadellaw.com
  * Description:       Business listings for the Mergers & Acquisitions section.
- * Version:           1.3.1
+ * Version:           1.3.2
  * Requires at least: 6.5
  * Requires PHP:      8.3
  * Requires Plugins:  advanced-custom-fields
@@ -20,7 +20,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 define( 'HAL_BL_FILE', __FILE__ );
-define( 'HAL_BL_VERSION', '1.3.1' );
+define( 'HAL_BL_VERSION', '1.3.2' );
 define( 'HAL_BL_SCHEMA_VERSION', '1.3.1' );
 
 // GitHub Releases update source — overridable from wp-config.php.

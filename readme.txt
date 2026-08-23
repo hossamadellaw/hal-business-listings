@@ -4,7 +4,7 @@ Tags: custom-post-type, acf, mergers-acquisitions, business-listings, elementor,
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.3
-Stable tag: 1.3.1
+Stable tag: 1.3.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -93,6 +93,9 @@ The widget shows a featured image only when the listing has one and `Public visu
 Only users with the `manage_hal_bl_sensitive_data` capability, which is initially granted to Administrators.
 
 == Changelog ==
+
+= 1.3.2 =
+* Release-engineering bump to validate the GitHub Releases update cycle end-to-end. No functional changes.
 
 = 1.3.1 =
 * Reorganized the plugin into focused Bootstrap, listings, display, and optional Elementor modules with fallback single/archive templates.
