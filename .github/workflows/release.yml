@@ -1,0 +1,76 @@
+# خط إصدار واحد مبسط: أدوات رسمية فقط، بدون أسرار خارجية.
+name: Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+
+permissions:
+  contents: write   # الحد الأدنى اللازم لإنشاء الـRelease ورفع الـAsset.
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install production dependencies only
+        run: composer install --no-dev --optimize-autoloader
+
+      - name: Verify version match with tag (prevents silent update loops)
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+
+          # "|| true" + فحص فارغ صريح: فشل grep الذي لا يجد تطابقًا يجب أن
+          # يظهر برسالة مسماة، لا أن يقتل الخطوة بصمت عبر set -e.
+          HEADER_VERSION=$(grep -oPm1 '^[ \t]*\*[ \t]*Version:[ \t]*\K[0-9.]+' hal-business-listings.php || true)
+          STABLE_TAG=$(grep -oPm1 '^Stable tag:[ \t]*\K[0-9.]+' readme.txt || true)
+          CONST_VERSION=$(grep -oPm1 "define\( 'HAL_BL_VERSION', '\K[0-9.]+" hal-business-listings.php || true)
+
+          if [ -z "$HEADER_VERSION" ]; then
+            echo "::error::Plugin header Version not found"
+            exit 1
+          fi
+          if [ "$TAG_VERSION" != "$HEADER_VERSION" ]; then
+            echo "::error::Header version ($HEADER_VERSION) != tag ($TAG_VERSION)"
+            exit 1
+          fi
+          if [ -z "$STABLE_TAG" ]; then
+            echo "::error::Stable tag not found in readme.txt"
+            exit 1
+          fi
+          if [ "$TAG_VERSION" != "$STABLE_TAG" ]; then
+            echo "::error::Stable tag ($STABLE_TAG) != tag ($TAG_VERSION)"
+            exit 1
+          fi
+          if [ -z "$CONST_VERSION" ]; then
+            echo "::error::Version constant not found"
+            exit 1
+          fi
+          if [ "$TAG_VERSION" != "$CONST_VERSION" ]; then
+            echo "::error::Version constant ($CONST_VERSION) != tag ($TAG_VERSION)"
+            exit 1
+          fi
+
+      - name: Build plugin package (excludes development-only files)
+        run: |
+          # القائمة مشتقة فعليًا من bootstrap + التحميل الشرطي في
+          # includes/class-hal-bl-elementor.php (ودجت root) + الأصول المُشار
+          # إليها عبر plugin_dir_url/path. التقارير الداخلية وcomposer.* و
+          # .github مستثناة عمدًا.
+          mkdir -p build/hal-business-listings
+          cp -r hal-business-listings.php additions-cta-amelia.php class-hal-bl-elementor-listing-visual-widget.php uninstall.php readme.txt wpml-config.xml includes assets languages vendor build/hal-business-listings/
+          cd build && zip -rq "hal-business-listings-${GITHUB_REF_NAME#v}.zip" hal-business-listings
+
+      # سلوك مقصود: إعادة تشغيل الـworkflow لنفس Tag القائم تفشل
+      # إلا بعد حذف الـRelease القديم يدويًا — لا حذف دفاعي تلقائي
+      # لإصدار قد تكون مواقع حية استهلكته فعلًا.
+      - name: Create GitHub Release with the package asset
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            "build/hal-business-listings-${GITHUB_REF_NAME#v}.zip" \
+            --title "HAL Business Listings ${GITHUB_REF_NAME}" \
+            --generate-notes

@@ -1,0 +1,138 @@
+/* ==========================================================
+   hal-business-listings — تنسيق أزرار CTA وشارات الحالة
+   يُسجَّل ويُحمَّل تلقائيًا من الإضافة في صفحات business_listing
+   (مفرد/أرشيف/تصنيف الدولة)، ويُحمَّله Elementor كاعتمادية نمط
+   لويدجت HAL Listing Visual حيث يُستخدم — لا حاجة لأي لصق يدوي.
+   ==========================================================
+
+   قيم (--hal-bl-*) أدناه placeholders محايدة اختيارية للتجاوز من
+   الثيم بمتغيرات الهوية الرسمية (مثل --e-global-color-primary)
+   لتطابق هوية الموقع. لا تغيِّر نطاقات hal-bl-* دون اختبار تأثير. */
+
+:root {
+	--hal-bl-color-primary:     #0f2a3f; /* استبدلها بلون العلامة الأساسي */
+	--hal-bl-color-primary-h:   #143a56; /* درجة hover أغمق قليلاً */
+	--hal-bl-color-muted:       #6b7280;
+	--hal-bl-color-border:      #d8dde3;
+	--hal-bl-color-sold-bg:     #6b7280;
+	--hal-bl-color-sold-fg:     #ffffff;
+	--hal-bl-radius:            6px;
+	--hal-bl-space-xs:          0.5rem;
+	--hal-bl-space-sm:          0.75rem;
+	--hal-bl-space-md:          1.25rem;
+}
+
+/* الزرار الأساسي (الاستشارة العامة + Reserve/Request Introduction) */
+.hal-bl-cta {
+	display: inline-block;
+	padding: var(--hal-bl-space-sm) var(--hal-bl-space-md);
+	border-radius: var(--hal-bl-radius);
+	background: var(--hal-bl-color-primary);
+	color: #fff;
+	text-decoration: none;
+	font-weight: 600;
+	line-height: 1.2;
+	transition: background-color 0.15s ease;
+}
+.hal-bl-cta:hover,
+.hal-bl-cta:focus-visible {
+	background: var(--hal-bl-color-primary-h);
+	color: #fff;
+}
+.hal-bl-cta:focus-visible,
+.hal-bl-context-link:focus-visible {
+	outline: 3px solid currentColor;
+	outline-offset: 3px;
+}
+
+/* تمييز بصري بسيط بين نوعي الزرار عند الحاجة لتفرقتهما */
+.hal-bl-cta-consultation {
+	background: transparent;
+	color: var(--hal-bl-color-primary);
+	border: 1px solid var(--hal-bl-color-primary);
+}
+.hal-bl-cta-consultation:hover,
+.hal-bl-cta-consultation:focus-visible {
+	background: var(--hal-bl-color-primary);
+	color: #fff;
+}
+
+/* حالة "قيد التفاوض" — ملاحظة أسفل الزرار */
+.hal-bl-cta-note {
+	margin-block-start: var(--hal-bl-space-xs);
+	font-size: 0.875rem;
+	color: var(--hal-bl-color-muted);
+}
+
+/* حالة "مباع" — شارة لا زرار */
+.hal-bl-badge {
+	display: inline-block;
+	padding: 0.35rem var(--hal-bl-space-sm);
+	border-radius: 999px;
+	font-size: 0.8125rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+}
+.hal-bl-badge-sold {
+	background: var(--hal-bl-color-sold-bg);
+	color: var(--hal-bl-color-sold-fg);
+}
+
+/* بانل "عايز تبيع شركتك؟" الثابت */
+.hal-bl-cta-seller {
+	background: var(--hal-bl-color-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.hal-bl-cta {
+		transition: none;
+	}
+}
+
+/* Elementor: HAL Listing Visual. Loaded only when the widget is used. */
+.hal-bl-listing-visual {
+	--hal-bl-visual-bg: #edf0f4;
+	--hal-bl-visual-fg: var(--hal-bl-color-primary);
+	position: relative;
+	display: block;
+	width: 100%;
+	aspect-ratio: 16 / 10;
+	overflow: hidden;
+	background: var(--hal-bl-visual-bg);
+	color: var(--hal-bl-visual-fg);
+}
+.hal-bl-listing-visual__image {
+	display: block;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+.hal-bl-listing-visual__placeholder {
+	display: grid;
+	width: 100%;
+	height: 100%;
+	place-items: center;
+	background-image: linear-gradient(135deg, rgba(15, 42, 63, 0.04) 25%, transparent 25%);
+	background-size: 28px 28px;
+}
+.hal-bl-listing-visual__placeholder svg {
+	width: clamp(3rem, 16%, 5.75rem);
+	height: clamp(3rem, 16%, 5.75rem);
+	fill: none;
+	stroke: currentColor;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+	stroke-width: 2;
+}
+.hal-bl-listing-visual--manufacturing { --hal-bl-visual-bg: #f4ead5; --hal-bl-visual-fg: #79551b; }
+.hal-bl-listing-visual--technology { --hal-bl-visual-bg: #e5f0f7; --hal-bl-visual-fg: #164d70; }
+.hal-bl-listing-visual--healthcare { --hal-bl-visual-bg: #e7f1eb; --hal-bl-visual-fg: #28664a; }
+.hal-bl-listing-visual--food-beverage { --hal-bl-visual-bg: #eee9f5; --hal-bl-visual-fg: #604b7d; }
+.hal-bl-listing-visual--logistics { --hal-bl-visual-bg: #e8eef5; --hal-bl-visual-fg: #24486b; }
+.hal-bl-listing-visual--professional-services { --hal-bl-visual-bg: #eeeae3; --hal-bl-visual-fg: #65543d; }
+.hal-bl-listing-visual--real-estate { --hal-bl-visual-bg: #e9eef0; --hal-bl-visual-fg: #3b5660; }
+.hal-bl-listing-visual--retail { --hal-bl-visual-bg: #f2e9e4; --hal-bl-visual-fg: #754d3b; }
+
+/* RTL — الخصائص فوق كلها منطقية (margin-block-start) بالفعل، لا
+   حاجة لأي تعديل إضافي بين الإنجليزية والعربية. */

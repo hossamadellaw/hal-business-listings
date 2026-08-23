@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- WPML configuration for Hal Business Listings. -->
+<wpml-config>
+	<custom-types>
+		<custom-type translate="1">business_listing</custom-type>
+	</custom-types>
+
+	<taxonomies>
+		<taxonomy translate="1">listing_country</taxonomy>
+	</taxonomies>
+
+	<custom-fields>
+		<custom-field action="copy">company_industry</custom-field>
+		<custom-field action="copy">public_visual_approved</custom-field>
+		<custom-field action="translate">company_city</custom-field>
+		<custom-field action="translate">legal_form</custom-field>
+
+		<custom-field action="copy">year_established</custom-field>
+		<custom-field action="copy">employee_count</custom-field>
+		<custom-field action="copy">price_display_mode</custom-field>
+		<custom-field action="copy">price_range</custom-field>
+		<custom-field action="copy">listing_status</custom-field>
+		<custom-field action="copy">company_reference</custom-field>
+		<custom-field action="copy" type="post-ids" sub-type="attachment">company_gallery</custom-field>
+	</custom-fields>
+</wpml-config>

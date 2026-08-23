@@ -1,0 +1,9 @@
+/* Scoped fallback-template layout. */
+.hal-bl-single,.hal-bl-archive{max-width:1200px;margin-inline:auto;padding:2rem 1rem}
+.hal-bl-listing-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1.5rem}
+.hal-bl-listing-card{border:1px solid #d9d9d9;border-radius:.5rem;overflow:hidden;padding:1rem}
+.hal-bl-card-visual img,.hal-bl-visual img{display:block;width:100%;height:auto}
+.hal-bl-visual-placeholder{aspect-ratio:16/9;background:#f3f4f6}
+.hal-bl-listing-details{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.75rem 1rem}
+.hal-bl-listing-details dt,.hal-bl-status{font-weight:700}.hal-bl-listing-details dd{margin:.25rem 0 0}.hal-bl-status-sold{color:#8a1f11}
+@media (max-width:600px){.hal-bl-single,.hal-bl-archive{padding:1.25rem .75rem}}

@@ -1,0 +1,9 @@
+# Build artifacts — rebuilt by the release workflow from composer.lock.
+vendor/
+
+# Internal engineering reports — never shipped, never published.
+HAL-business-Listings-v-1_3_1-executive-remediation-plan.md
+
+# OS junk
+.DS_Store
+Thumbs.db
