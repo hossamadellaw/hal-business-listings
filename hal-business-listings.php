@@ -3,7 +3,7 @@
  * Plugin Name:       Hossam Adel Law Firm — Business Listings
  * Plugin URI:        https://hossamadellaw.com
  * Description:       Business listings for the Mergers & Acquisitions section.
- * Version:           1.3.2
+ * Version:           1.4.0
  * Requires at least: 6.5
  * Requires PHP:      8.3
  * Requires Plugins:  advanced-custom-fields
@@ -11,6 +11,7 @@
  * Text Domain:       hal-business-listings
  * Domain Path:       /languages
  * License:           GPL-2.0-or-later
+ * Update URI:        https://github.com/hossamadellaw/hal-business-listings
  */
 
 declare(strict_types=1);
@@ -20,7 +21,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 define( 'HAL_BL_FILE', __FILE__ );
-define( 'HAL_BL_VERSION', '1.3.2' );
+define( 'HAL_BL_VERSION', '1.4.0' );
 define( 'HAL_BL_SCHEMA_VERSION', '1.3.1' );
 
 // GitHub Releases update source — overridable from wp-config.php.
@@ -32,6 +33,13 @@ require_once __DIR__ . '/includes/class-hal-bl-listings.php';
 require_once __DIR__ . '/includes/class-hal-bl-display.php';
 require_once __DIR__ . '/includes/class-hal-bl-elementor.php';
 require_once __DIR__ . '/includes/class-hal-bl-updater.php';
+
+// Editor infrastructure (Card C1). A missing or broken editor class must
+// never take the plugin or the normal Gutenberg editor down with it.
+if ( is_readable( __DIR__ . '/includes/class-hal-bl-editor.php' ) ) {
+	require_once __DIR__ . '/includes/class-hal-bl-editor.php';
+}
+
 require_once __DIR__ . '/additions-cta-amelia.php';
 
 function hal_bl_load_textdomain(): void {

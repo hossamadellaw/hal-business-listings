@@ -22,40 +22,26 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 	exit;
 }
 
-/**
- * Static list mirroring hal_bl_listing_capabilities() plus the default seller
- * capability. Kept standalone on purpose: this file runs isolated, and
- * requiring plugin files here would fatal on the undefined HAL_BL_FILE
- * constant. A site filtering hal_bl_seller_field_capability to a custom name
- * leaves that custom capability behind — accepted constraint of isolation.
- */
-function hal_bl_uninstall_capabilities(): array {
-	return array(
-		'edit_business_listing',
-		'read_business_listing',
-		'delete_business_listing',
-		'edit_business_listings',
-		'edit_others_business_listings',
-		'publish_business_listings',
-		'read_private_business_listings',
-		'delete_business_listings',
-		'delete_private_business_listings',
-		'delete_published_business_listings',
-		'delete_others_business_listings',
-		'edit_private_business_listings',
-		'edit_published_business_listings',
-		'manage_hal_bl_sensitive_data',
-	);
-}
-
 function hal_bl_remove_capabilities_for_site(): void {
 	$role = get_role( 'administrator' );
 	if ( ! $role ) {
 		return;
 	}
 
-	foreach ( hal_bl_uninstall_capabilities() as $cap ) {
-		$role->remove_cap( $cap );
+	// The ledger is the only ownership source: an entry classified
+	// 'granted' was absent from the role before this plugin's first grant
+	// of it, so HAL introduced it. Entries classified 'pre_existing'
+	// pre-dated HAL and belong to whoever placed them. Without a ledger
+	// nothing is removable — origin unproven.
+	$ledger = get_option( 'hal_bl_capabilities_ledger', false );
+	if ( ! is_array( $ledger ) ) {
+		return;
+	}
+
+	foreach ( $ledger as $cap => $origin ) {
+		if ( 'granted' === $origin ) {
+			$role->remove_cap( (string) $cap );
+		}
 	}
 }
 
@@ -77,6 +63,7 @@ function hal_bl_uninstall_site(): void {
 	wp_clear_scheduled_hook( 'hal_bl_amelia_catalog_sync' );
 
 	hal_bl_remove_capabilities_for_site();
+	delete_option( 'hal_bl_capabilities_ledger' );
 }
 
 if ( is_multisite() ) {

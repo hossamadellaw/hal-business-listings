@@ -1,0 +1,120 @@
+/**
+ * hal-business-listings v1.4.0 - Card C5
+ * Editor styles for the business_listing block-editor screens only.
+ *
+ * Scope contract: every rule is double-gated behind the admin body class
+ * body.post-type-business_listing (present only on post.php / post-new.php
+ * for this post type) plus a plugin-owned .hal-bl-* class planted by C4
+ * (admin-editor.js). No generic .components-* selector is used, so no
+ * WordPress, Elementor, Spectra, or Rank Math control is restyled.
+ *
+ * RTL: logical properties only (border-inline-start, padding-inline, …);
+ * the page direction is owned by WordPress. No fixed heights, no absolute
+ * or fixed positioning — content stays visible and the native inspector
+ * remains dismissible at every width.
+ *
+ * Palette: approved navy / gold / cream language from the mockup.
+ */
+
+body.post-type-business_listing {
+	--hal-bl-nav: #1d1d1f;
+	--hal-bl-ink: #171825;
+	--hal-bl-muted: #686775;
+	--hal-bl-line: #deddd7;
+	--hal-bl-cream: #f6f5f0;
+	--hal-bl-gold: #c5a028;
+	--hal-bl-gold-soft: #f2e7c0;
+	--hal-bl-danger: #b42318;
+	--hal-bl-danger-soft: #fff3f1;
+	--hal-bl-danger-focus: #fff8f7;
+	--hal-bl-focus: rgba(56, 88, 233, 0.35);
+	--hal-bl-radius: 6px;
+}
+
+/* Validation error state (C4 wraps each required field wrapper) */
+body.post-type-business_listing .hal-bl-editor-invalid {
+	border-inline-start: 3px solid var(--hal-bl-danger);
+	background: var(--hal-bl-danger-soft);
+	padding: 8px;
+	border-radius: var(--hal-bl-radius);
+}
+
+/* Visible focus inside an invalid field without touching native control styles */
+body.post-type-business_listing .hal-bl-editor-invalid:focus-within {
+	background: var(--hal-bl-danger-focus);
+	border-inline-start-color: var(--hal-bl-ink);
+}
+
+/* Restricted seller panel: gold identity, cream surface (visibility itself
+ * stays fail-closed in C4 JS; this is presentation only). */
+body.post-type-business_listing .hal-bl-seller-panel {
+	border-inline-start: 3px solid var(--hal-bl-gold);
+	background: var(--hal-bl-cream);
+}
+
+/* Expanded/collapsed visibility: the opened panel reads warmer than the
+ * collapsed one, both distinguishable from sibling native panels. */
+body.post-type-business_listing .hal-bl-seller-panel.is-opened {
+	background: var(--hal-bl-gold-soft);
+}
+
+/* Gallery list inside the manage-gallery modal */
+body.post-type-business_listing .hal-bl-gallery-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	list-style: none;
+	margin: 0 0 12px;
+	padding: 0;
+	max-width: 100%;
+}
+
+body.post-type-business_listing .hal-bl-gallery-item {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+	background: #fff;
+	border: 1px solid var(--hal-bl-line);
+	border-radius: var(--hal-bl-radius);
+	padding: 6px;
+	max-width: 100%;
+}
+
+body.post-type-business_listing .hal-bl-gallery-item img {
+	display: block;
+	width: 80px;
+	height: 80px;
+	object-fit: cover;
+	border-radius: 4px;
+}
+
+/* Textual id placeholder when boot data carries ids without URLs */
+body.post-type-business_listing .hal-bl-gallery-item span {
+	color: var(--hal-bl-nav);
+	font-size: 12px;
+}
+
+/* Visible focus for the item's own action buttons (native focus retained) */
+body.post-type-business_listing .hal-bl-gallery-item button:focus {
+	outline: 2px solid var(--hal-bl-focus);
+	outline-offset: 1px;
+}
+
+/* Visible disabled state for Move up / Move down at the list edges */
+body.post-type-business_listing .hal-bl-gallery-item button:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+/* Narrow widths: keep every action reachable; items stack full-width so
+ * nothing is clipped and the native inspector stays dismissible. */
+@media (max-width: 782px) {
+	body.post-type-business_listing .hal-bl-gallery-list {
+		gap: 6px;
+	}
+
+	body.post-type-business_listing .hal-bl-gallery-item {
+		flex-basis: 100%;
+	}
+}

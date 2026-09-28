@@ -1,0 +1,448 @@
+name: Time-Bounded Target-Read-Only Release Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: Exact authorized GitHub Environment name for this run
+        required: true
+        type: string
+      expected_version:
+        description: Release version expected on the already updated target
+        required: true
+        type: string
+      deployment_commit_sha:
+        description: Full commit SHA that was manually installed on the target
+        required: true
+        type: string
+      release_id:
+        description: Public release identifier bound to this verification
+        required: true
+        type: string
+      manual_install_confirmed:
+        description: Confirm that the release ZIP was installed before this run
+        required: true
+        type: boolean
+
+permissions: {}
+
+# The sequential job timeouts are an active-execution hard bound: 2 + 8 + 2 = 12
+# minutes for the complete cycle after each job starts. GitHub queue time and the wait
+# for Environment protection approval happen before active job execution and are outside
+# this bound. A job that never starts cannot emit a pass result or an adoption signal.
+# workflow_call remains unavailable until a real caller technically gates it on a
+# successful deployment job; Release publication or caller-supplied claims are not proof.
+
+# The raw Environment name is intentionally absent from the externally visible
+# concurrency key. It is used only inside the Environment-bound verify-target job;
+# environment_digest is the sole identity admitted to later evidence and lifecycle state.
+concurrency:
+  group: release-verification-${{ github.repository }}
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    name: Preflight
+    # Standard Ubuntu runners are intended for public repositories only. The owner must
+    # configure an external hard-stop Actions budget for exceptional shared-quota costs.
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Validate dispatch and public control-plane claims
+        shell: bash
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          DEPLOYMENT_COMMIT_SHA: ${{ inputs.deployment_commit_sha }}
+          RELEASE_ID: ${{ inputs.release_id }}
+          MANUAL_INSTALL_CONFIRMED: ${{ inputs.manual_install_confirmed }}
+          REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$EXPECTED_VERSION" =~ ^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$ ]]; then
+            echo "release-verification:blocked:input_expected_version_invalid" >&2
+            exit 1
+          fi
+          if [[ ! "$DEPLOYMENT_COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "release-verification:blocked:input_deployment_commit_sha_invalid" >&2
+            exit 1
+          fi
+          if [[ ! "$RELEASE_ID" =~ ^[0-9A-Za-z][0-9A-Za-z._:-]{0,127}$ ]]; then
+            echo "release-verification:blocked:input_release_id_invalid" >&2
+            exit 1
+          fi
+          if [ "$MANUAL_INSTALL_CONFIRMED" != "true" ]; then
+            echo "release-verification:blocked:manual_install_not_confirmed" >&2
+            exit 1
+          fi
+          if [ "$REPOSITORY_VISIBILITY" != "public" ] || [ "$REPOSITORY_PRIVATE" != "false" ]; then
+            echo "release-verification:blocked:repository_must_be_public" >&2
+            exit 1
+          fi
+
+  verify-target:
+    name: Verify target
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+      actions: read
+    environment:
+      name: ${{ inputs.target_environment }}
+    outputs:
+      overall: ${{ steps.admit-management.outputs.overall }}
+      management_payload: ${{ steps.admit-management.outputs.management_payload }}
+    steps:
+      - name: Checkout verifier commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # CONFIG-R's current default binding names form a closed allowlist here. Do not
+      # enumerate the vars context or pass an aggregate vars/secrets object. Changing
+      # these names later requires a separately authorized Workflow-alignment card.
+      - name: Resolve Environment-bound configuration
+        id: resolve
+        shell: bash
+        env:
+          VERIFICATION_CONFIG_TEMPLATE: ${{ github.workspace }}/tests/external/verification-config.json
+          VERIFICATION_TEMP_ROOT: ${{ runner.temp }}
+          VERIFICATION_CONFIG: ${{ runner.temp }}/release-verification-resolved/verification-config.resolved.json
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+          VERIFICATION_TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+          VERIFICATION_RELEASE_ASSET_NAME_TEMPLATE: ${{ vars.VERIFICATION_RELEASE_ASSET_NAME_TEMPLATE }}
+          VERIFICATION_PRIMARY_ORIGIN: ${{ vars.VERIFICATION_PRIMARY_ORIGIN }}
+          VERIFICATION_PRIMARY_CHECK_PATH: ${{ vars.VERIFICATION_PRIMARY_CHECK_PATH }}
+          VERIFICATION_PRIMARY_PUBLIC_MARKER: ${{ vars.VERIFICATION_PRIMARY_PUBLIC_MARKER }}
+          VERIFICATION_PRIMARY_VERSION_PATH: ${{ vars.VERIFICATION_PRIMARY_VERSION_PATH }}
+          VERIFICATION_PRIMARY_VERSION_HEADER: ${{ vars.VERIFICATION_PRIMARY_VERSION_HEADER }}
+          VERIFICATION_CDN_ORIGIN: ${{ vars.VERIFICATION_CDN_ORIGIN }}
+          VERIFICATION_CDN_CHECK_PATH: ${{ vars.VERIFICATION_CDN_CHECK_PATH }}
+          VERIFICATION_CDN_VERSION_PATH: ${{ vars.VERIFICATION_CDN_VERSION_PATH }}
+          VERIFICATION_CDN_VERSION_HEADER: ${{ vars.VERIFICATION_CDN_VERSION_HEADER }}
+        run: |
+          set -euo pipefail
+          if [ -z "${VERIFICATION_CDN_ORIGIN:-}" ]; then
+            if [ -n "${VERIFICATION_CDN_CHECK_PATH:-}" ] || [ -n "${VERIFICATION_CDN_VERSION_PATH:-}" ] || [ -n "${VERIFICATION_CDN_VERSION_HEADER:-}" ]; then
+              echo "release-verification:blocked:config:binding_cdn_dependents_without_origin" >&2
+              exit 1
+            fi
+            unset VERIFICATION_CDN_ORIGIN VERIFICATION_CDN_CHECK_PATH VERIFICATION_CDN_VERSION_PATH VERIFICATION_CDN_VERSION_HEADER
+          fi
+          node tests/external/verify.mjs resolve
+
+      - name: Validate resolved configuration and public control-plane prerequisites
+        id: resolved-preflight
+        env:
+          VERIFICATION_TEMP_ROOT: ${{ runner.temp }}
+          VERIFICATION_CONFIG: ${{ runner.temp }}/release-verification-resolved/verification-config.resolved.json
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          DEPLOYMENT_COMMIT_SHA: ${{ inputs.deployment_commit_sha }}
+          RELEASE_ID: ${{ inputs.release_id }}
+          CLAIM_SOURCE: manual_operator
+          VERIFIER_COMMIT_SHA: ${{ github.sha }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          INVOCATION_KIND: dispatch
+          MANUAL_INSTALL_CONFIRMED: ${{ inputs.manual_install_confirmed }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node tests/external/verify.mjs validate
+
+      - name: Verify public read-only target
+        id: verify-public
+        if: ${{ steps.resolved-preflight.outputs.basic_auth_required != 'true' }}
+        continue-on-error: true
+        env:
+          VERIFICATION_TEMP_ROOT: ${{ runner.temp }}
+          VERIFICATION_CONFIG: ${{ runner.temp }}/release-verification-resolved/verification-config.resolved.json
+          OUTPUT_DIR: verification-output
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          DEPLOYMENT_COMMIT_SHA: ${{ inputs.deployment_commit_sha }}
+          RELEASE_ID: ${{ inputs.release_id }}
+          CLAIM_SOURCE: manual_operator
+          VERIFIER_COMMIT_SHA: ${{ github.sha }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          PROVENANCE_PAYLOAD: ${{ steps.resolved-preflight.outputs.provenance_payload }}
+        run: node tests/external/verify.mjs verify
+
+      - name: Verify Basic-Auth-protected read-only target
+        id: verify-authenticated
+        if: ${{ steps.resolved-preflight.outputs.basic_auth_required == 'true' }}
+        continue-on-error: true
+        env:
+          VERIFICATION_TEMP_ROOT: ${{ runner.temp }}
+          VERIFICATION_CONFIG: ${{ runner.temp }}/release-verification-resolved/verification-config.resolved.json
+          OUTPUT_DIR: verification-output
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          DEPLOYMENT_COMMIT_SHA: ${{ inputs.deployment_commit_sha }}
+          RELEASE_ID: ${{ inputs.release_id }}
+          CLAIM_SOURCE: manual_operator
+          VERIFIER_COMMIT_SHA: ${{ github.sha }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          PROVENANCE_PAYLOAD: ${{ steps.resolved-preflight.outputs.provenance_payload }}
+          TARGET_BASIC_AUTH_USERNAME: ${{ secrets.TARGET_BASIC_AUTH_USERNAME }}
+          TARGET_BASIC_AUTH_PASSWORD: ${{ secrets.TARGET_BASIC_AUTH_PASSWORD }}
+        run: node tests/external/verify.mjs verify
+
+      - name: Remove resolved configuration
+        id: cleanup-resolved-config
+        if: ${{ always() }}
+        env:
+          VERIFICATION_TEMP_ROOT: ${{ runner.temp }}
+          VERIFICATION_CONFIG: ${{ runner.temp }}/release-verification-resolved/verification-config.resolved.json
+        run: node tests/external/verify.mjs cleanup
+
+      - name: Validate bounded sanitized evidence
+        id: artifact-gate
+        if: ${{ always() && steps.resolve.outcome == 'success' && steps.resolved-preflight.outcome == 'success' && steps.cleanup-resolved-config.outcome == 'success' && (steps.resolved-preflight.outputs.basic_auth_required == 'true' || steps.resolved-preflight.outputs.basic_auth_required == 'false') }}
+        shell: bash
+        env:
+          EXPECTED_ENVIRONMENT_DIGEST: ${{ steps.resolved-preflight.outputs.environment_digest }}
+          BASIC_AUTH_REQUIRED: ${{ steps.resolved-preflight.outputs.basic_auth_required }}
+          PUBLIC_OUTCOME: ${{ steps.verify-public.outcome }}
+          PUBLIC_OVERALL: ${{ steps.verify-public.outputs.overall }}
+          PUBLIC_MANAGEMENT_PAYLOAD: ${{ steps.verify-public.outputs.management_payload }}
+          AUTHENTICATED_OUTCOME: ${{ steps.verify-authenticated.outcome }}
+          AUTHENTICATED_OVERALL: ${{ steps.verify-authenticated.outputs.overall }}
+          AUTHENTICATED_MANAGEMENT_PAYLOAD: ${{ steps.verify-authenticated.outputs.management_payload }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+
+          process.on('uncaughtException', (error) => {
+            const message = String(error?.message ?? '');
+            const code = /^[a-z0-9_]{1,128}$/u.test(message) ? message : 'artifact_contract_error';
+            console.error(`release-verification:blocked:${code}`);
+            process.exit(1);
+          });
+
+          const basicAuthRequired = process.env.BASIC_AUTH_REQUIRED ?? '';
+          if (basicAuthRequired !== 'true' && basicAuthRequired !== 'false') throw new Error('verification_selection_invalid');
+          const publicResult = {
+            outcome: process.env.PUBLIC_OUTCOME ?? '',
+            overall: process.env.PUBLIC_OVERALL ?? '',
+            managementPayload: process.env.PUBLIC_MANAGEMENT_PAYLOAD ?? '',
+          };
+          const authenticatedResult = {
+            outcome: process.env.AUTHENTICATED_OUTCOME ?? '',
+            overall: process.env.AUTHENTICATED_OVERALL ?? '',
+            managementPayload: process.env.AUTHENTICATED_MANAGEMENT_PAYLOAD ?? '',
+          };
+          const selected = basicAuthRequired === 'true' ? authenticatedResult : publicResult;
+          const unselected = basicAuthRequired === 'true' ? publicResult : authenticatedResult;
+          if (unselected.outcome !== 'skipped' || unselected.overall !== '' || unselected.managementPayload !== '') throw new Error('verification_unselected_branch_invalid');
+          const allowedNonPass = new Set(['fail', 'blocked', 'not_observable_read_only']);
+          const selectedMatrixValid = (selected.outcome === 'success' && selected.overall === 'pass') || (selected.outcome === 'failure' && allowedNonPass.has(selected.overall));
+          if (!selectedMatrixValid || selected.managementPayload === '') throw new Error('verification_selected_branch_invalid');
+          const selectedOverall = selected.overall;
+          const encodedManagement = selected.managementPayload;
+
+          const MAX_REPORT_BYTES = 262144;
+          const MAX_JUNIT_BYTES = 262144;
+          const MAX_COMBINED_BYTES = 262144;
+          const expectedNames = ['junit.xml', 'report.json'];
+          const root = path.resolve(process.cwd(), 'verification-output');
+          const canonicalCwd = fs.realpathSync.native(process.cwd());
+          const expectedRoot = path.resolve(canonicalCwd, 'verification-output');
+          const rootStat = fs.lstatSync(root);
+          if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error('artifact_root_type_forbidden');
+          const canonicalRoot = fs.realpathSync.native(root);
+          if (canonicalRoot !== expectedRoot) throw new Error('artifact_root_escape');
+
+          const entries = fs.readdirSync(root, { withFileTypes: true });
+          const names = entries.map((entry) => entry.name).sort();
+          if (JSON.stringify(names) !== JSON.stringify(expectedNames)) throw new Error('artifact_allowlist_mismatch');
+          const sizes = new Map();
+          for (const entry of entries) {
+            const candidate = path.join(root, entry.name);
+            const stat = fs.lstatSync(candidate);
+            if (!entry.isFile() || !stat.isFile() || entry.isSymbolicLink() || stat.isSymbolicLink()) throw new Error('artifact_file_type_forbidden');
+            const canonicalFile = fs.realpathSync.native(candidate);
+            if (path.dirname(canonicalFile) !== canonicalRoot) throw new Error('artifact_file_escape');
+            sizes.set(entry.name, stat.size);
+          }
+          if (sizes.get('report.json') > MAX_REPORT_BYTES) throw new Error('report_size_limit_exceeded');
+          if (sizes.get('junit.xml') > MAX_JUNIT_BYTES) throw new Error('junit_size_limit_exceeded');
+          if (sizes.get('report.json') + sizes.get('junit.xml') > MAX_COMBINED_BYTES) throw new Error('combined_artifact_size_limit_exceeded');
+
+          const reportText = fs.readFileSync(path.join(root, 'report.json'), 'utf8');
+          const junitText = fs.readFileSync(path.join(root, 'junit.xml'), 'utf8');
+          const report = JSON.parse(reportText);
+          const topLevel = ['attempts', 'budgets', 'code', 'completed_at', 'environment_digest', 'incident', 'incident_fingerprints', 'management_eligible', 'metadata', 'overall', 'schema_version', 'scope_notice', 'started_at'];
+          if (JSON.stringify(Object.keys(report).sort()) !== JSON.stringify(topLevel)) throw new Error('report_schema_keys_invalid');
+          if (report.schema_version !== 3 || !['pass', 'fail', 'blocked', 'not_observable_read_only'].includes(report.overall) || report.overall !== selectedOverall) throw new Error('report_schema_result_invalid');
+          if (!/^[0-9a-f]{64}$/u.test(report.environment_digest) || report.environment_digest !== process.env.EXPECTED_ENVIRONMENT_DIGEST) throw new Error('report_environment_digest_invalid');
+          if (!Array.isArray(report.attempts) || !Array.isArray(report.incident_fingerprints) || typeof report.budgets !== 'object' || report.budgets === null) throw new Error('report_schema_shape_invalid');
+
+          if (!/^[A-Za-z0-9_-]{1,32768}$/u.test(encodedManagement)) throw new Error('management_payload_encoding_invalid');
+          let management;
+          try {
+            management = JSON.parse(Buffer.from(encodedManagement, 'base64url').toString('utf8'));
+          } catch {
+            throw new Error('management_payload_json_invalid');
+          }
+          const managementTopLevel = ['claims', 'code', 'completed_at', 'config_digest', 'environment_digest', 'incident', 'incident_fingerprints', 'management_eligible', 'observations', 'overall', 'repository', 'run_attempt', 'run_id', 'run_url', 'schema_version', 'verifier_commit_sha', 'workflow_sha'];
+          if (JSON.stringify(Object.keys(management).sort()) !== JSON.stringify(managementTopLevel)) throw new Error('management_payload_schema_keys_invalid');
+          if (management.schema_version !== 3 || management.environment_digest !== report.environment_digest || management.environment_digest !== process.env.EXPECTED_ENVIRONMENT_DIGEST) throw new Error('management_payload_identity_invalid');
+          if (management.overall !== report.overall || management.code !== report.code || management.management_eligible !== report.management_eligible) throw new Error('management_payload_result_mismatch');
+
+          const forbiddenKeys = new Set(['authorization', 'body', 'cookie', 'credentials', 'environment', 'headers', 'password', 'proxy_authorization', 'query_string', 'raw_error', 'raw_headers', 'response_body', 'set_cookie', 'stack', 'stack_trace', 'username']);
+          const inspect = (value) => {
+            if (!value || typeof value !== 'object') return;
+            for (const [key, child] of Object.entries(value)) {
+              if (forbiddenKeys.has(key.toLowerCase().replaceAll('-', '_'))) throw new Error('report_redaction_key_forbidden');
+              inspect(child);
+            }
+          };
+          inspect(report);
+          inspect(management);
+          if (!/^<\?xml version="1\.0" encoding="UTF-8"\?>\n<testsuite name="release-verification" tests="\d+" failures="\d+" errors="\d+">/u.test(junitText) || !junitText.endsWith('</testsuite>\n') || /<!DOCTYPE/iu.test(junitText)) throw new Error('junit_schema_invalid');
+          const sensitiveValue = /Basic\s+[A-Za-z0-9+/=]{8,}|(?:password|passwd|token|secret)\s*[=:]\s*\S+|-----BEGIN [A-Z ]*PRIVATE KEY-----/iu;
+          if (sensitiveValue.test(reportText) || sensitiveValue.test(junitText) || sensitiveValue.test(JSON.stringify(management))) throw new Error('artifact_redaction_value_forbidden');
+          if (!process.env.GITHUB_OUTPUT) throw new Error('artifact_gate_output_missing');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `overall=${selectedOverall}\nmanagement_payload=${encodedManagement}\n`, { encoding: 'utf8' });
+          console.log(`artifact-contract:pass:report=${sizes.get('report.json')}:junit=${sizes.get('junit.xml')}:combined=${sizes.get('report.json') + sizes.get('junit.xml')}`);
+          NODE
+
+      - name: Upload bounded sanitized evidence
+        id: artifact
+        if: ${{ always() && steps.artifact-gate.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-verification-${{ steps.resolved-preflight.outputs.environment_digest }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            verification-output/report.json
+            verification-output/junit.xml
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 9
+
+      - name: Admit bounded management evidence
+        id: admit-management
+        if: ${{ always() && steps.artifact-gate.outcome == 'success' && steps.artifact.outcome == 'success' }}
+        shell: bash
+        env:
+          OVERALL: ${{ steps.artifact-gate.outputs.overall }}
+          MANAGEMENT_PAYLOAD: ${{ steps.artifact-gate.outputs.management_payload }}
+        run: |
+          set -euo pipefail
+          printf 'overall=%s\n' "$OVERALL" >> "$GITHUB_OUTPUT"
+          printf 'management_payload=%s\n' "$MANAGEMENT_PAYLOAD" >> "$GITHUB_OUTPUT"
+
+      - name: Set target verification conclusion
+        if: ${{ always() }}
+        env:
+          RESOLVE_OUTCOME: ${{ steps.resolve.outcome }}
+          PREFLIGHT_OUTCOME: ${{ steps.resolved-preflight.outcome }}
+          CLEANUP_OUTCOME: ${{ steps.cleanup-resolved-config.outcome }}
+          BASIC_AUTH_REQUIRED: ${{ steps.resolved-preflight.outputs.basic_auth_required }}
+          PUBLIC_OUTCOME: ${{ steps.verify-public.outcome }}
+          PUBLIC_OVERALL: ${{ steps.verify-public.outputs.overall }}
+          PUBLIC_MANAGEMENT_PAYLOAD: ${{ steps.verify-public.outputs.management_payload }}
+          AUTHENTICATED_OUTCOME: ${{ steps.verify-authenticated.outcome }}
+          AUTHENTICATED_OVERALL: ${{ steps.verify-authenticated.outputs.overall }}
+          AUTHENTICATED_MANAGEMENT_PAYLOAD: ${{ steps.verify-authenticated.outputs.management_payload }}
+          ARTIFACT_GATE_OUTCOME: ${{ steps.artifact-gate.outcome }}
+          ARTIFACT_OUTCOME: ${{ steps.artifact.outcome }}
+          ADMISSION_OUTCOME: ${{ steps.admit-management.outcome }}
+          ADMITTED_OVERALL: ${{ steps.admit-management.outputs.overall }}
+          ADMITTED_MANAGEMENT_PAYLOAD: ${{ steps.admit-management.outputs.management_payload }}
+        run: |
+          if [ "$RESOLVE_OUTCOME" != "success" ]; then
+            echo "release-verification:blocked:config_resolution_failed" >&2
+            exit 1
+          fi
+          if [ "$PREFLIGHT_OUTCOME" != "success" ]; then
+            echo "release-verification:blocked:resolved_preflight_failed" >&2
+            exit 1
+          fi
+          if [ "$CLEANUP_OUTCOME" != "success" ]; then
+            echo "release-verification:blocked:resolved_cleanup_failed" >&2
+            exit 1
+          fi
+          if [ "$BASIC_AUTH_REQUIRED" = "true" ]; then
+            SELECTED_OUTCOME="$AUTHENTICATED_OUTCOME"
+            SELECTED_OVERALL="$AUTHENTICATED_OVERALL"
+            SELECTED_MANAGEMENT_PAYLOAD="$AUTHENTICATED_MANAGEMENT_PAYLOAD"
+            if [ "$PUBLIC_OUTCOME" != "skipped" ] || [ -n "$PUBLIC_OVERALL" ] || [ -n "$PUBLIC_MANAGEMENT_PAYLOAD" ]; then
+              echo "release-verification:blocked:verification_unselected_branch_invalid" >&2
+              exit 1
+            fi
+          elif [ "$BASIC_AUTH_REQUIRED" = "false" ]; then
+            SELECTED_OUTCOME="$PUBLIC_OUTCOME"
+            SELECTED_OVERALL="$PUBLIC_OVERALL"
+            SELECTED_MANAGEMENT_PAYLOAD="$PUBLIC_MANAGEMENT_PAYLOAD"
+            if [ "$AUTHENTICATED_OUTCOME" != "skipped" ] || [ -n "$AUTHENTICATED_OVERALL" ] || [ -n "$AUTHENTICATED_MANAGEMENT_PAYLOAD" ]; then
+              echo "release-verification:blocked:verification_unselected_branch_invalid" >&2
+              exit 1
+            fi
+          else
+            echo "release-verification:blocked:verification_selection_invalid" >&2
+            exit 1
+          fi
+          case "$SELECTED_OUTCOME:$SELECTED_OVERALL" in
+            success:pass|failure:fail|failure:blocked|failure:not_observable_read_only) ;;
+            *)
+              echo "release-verification:blocked:verification_selected_branch_invalid" >&2
+              exit 1
+              ;;
+          esac
+          if [ -z "$SELECTED_MANAGEMENT_PAYLOAD" ]; then
+            echo "release-verification:blocked:verification_selected_branch_invalid" >&2
+            exit 1
+          fi
+          if [ "$ARTIFACT_GATE_OUTCOME" != "success" ]; then
+            echo "release-verification:blocked:artifact_gate_failed" >&2
+            exit 1
+          fi
+          if [ "$ARTIFACT_OUTCOME" != "success" ]; then
+            echo "release-verification:blocked:artifact_control_error" >&2
+            exit 1
+          fi
+          if [ "$ADMISSION_OUTCOME" != "success" ] || [ "$ADMITTED_OVERALL" != "$SELECTED_OVERALL" ] || [ "$ADMITTED_MANAGEMENT_PAYLOAD" != "$SELECTED_MANAGEMENT_PAYLOAD" ]; then
+            echo "release-verification:blocked:management_admission_failed" >&2
+            exit 1
+          fi
+          if [ "$ADMITTED_OVERALL" != "pass" ]; then
+            echo "release-verification:$ADMITTED_OVERALL" >&2
+            exit 1
+          fi
+
+  # The schema-v3 MANAGEMENT_PAYLOAD is the only verifier evidence admitted to issue
+  # management. Its full environment_digest is the sole Environment identity.
+  # The engine derives bounded deterministic incident fingerprints from id/status/code
+  # and creates an incident only after the configured repeat count. Recovery requires a
+  # newer passing payload for the same environment_digest/version and closes each matching
+  # bot-recorded fingerprint after the expected version is stably observed; claims-only
+  # owner assertion is valid and verified provenance is not required. Supersession requires
+  # a newer ordered payload for the same environment_digest and a newer stable version with
+  # observation and verified provenance. Exact bot-authored markers/records, bounded search, and ordering by
+  # run/attempt/completed_at are validated before any create, reopen, close, or supersede.
+  manage-issue:
+    name: Manage incident issue
+    # This is strict secret, permission, and input isolation—not absolute network isolation.
+    needs:
+      - preflight
+      - verify-target
+    if: ${{ always() && needs.preflight.result == 'success' && needs.verify-target.result != 'cancelled' && needs.verify-target.result != 'skipped' && needs.verify-target.outputs.management_payload != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout verifier commit without target credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Deduplicate, update, close, or supersede the exact incident
+        env:
+          MANAGEMENT_PAYLOAD: ${{ needs.verify-target.outputs.management_payload }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node tests/external/verify.mjs manage-issue

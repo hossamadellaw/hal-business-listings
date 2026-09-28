@@ -1,0 +1,209 @@
+{
+  "document_kind": "verification-config-template",
+  "template_schema_version": 1,
+  "resolved_schema_version": 2,
+  "validation_contract": {
+    "template_validation": "binding_metadata_only",
+    "resolved_validation": "engine_schema_v2",
+    "template_is_resolved_config": false
+  },
+  "resolution_contract": {
+    "unknown_input_policy": "reject",
+    "missing_required_input_policy": "reject",
+    "invalid_input_policy": "reject",
+    "resolved_environment_key_binding": "target_environment",
+    "optional_targets": {
+      "cdn": {
+        "binding": "cdn_origin",
+        "on_missing": "remove_target_and_dependents",
+        "dependent_check_ids": [
+          "cdn-public"
+        ],
+        "dependent_version_source_ids": [
+          "cdn-version"
+        ]
+      }
+    }
+  },
+  "bindings": {
+    "target_environment": {
+      "environment_variable": "VERIFICATION_TARGET_ENVIRONMENT",
+      "value_type": "environment_name",
+      "required": true,
+      "sensitive": false
+    },
+    "release_asset_name_template": {
+      "environment_variable": "VERIFICATION_RELEASE_ASSET_NAME_TEMPLATE",
+      "value_type": "release_asset_name_template",
+      "required": true,
+      "sensitive": false
+    },
+    "primary_origin": {
+      "environment_variable": "VERIFICATION_PRIMARY_ORIGIN",
+      "value_type": "https_origin",
+      "required": true,
+      "sensitive": false
+    },
+    "primary_check_path": {
+      "environment_variable": "VERIFICATION_PRIMARY_CHECK_PATH",
+      "value_type": "relative_request_path",
+      "required": true,
+      "sensitive": false
+    },
+    "primary_public_marker": {
+      "environment_variable": "VERIFICATION_PRIMARY_PUBLIC_MARKER",
+      "value_type": "literal_text",
+      "required": true,
+      "sensitive": false
+    },
+    "primary_version_path": {
+      "environment_variable": "VERIFICATION_PRIMARY_VERSION_PATH",
+      "value_type": "relative_request_path",
+      "required": true,
+      "sensitive": false
+    },
+    "primary_version_header": {
+      "environment_variable": "VERIFICATION_PRIMARY_VERSION_HEADER",
+      "value_type": "http_header_name",
+      "required": true,
+      "sensitive": false
+    },
+    "cdn_origin": {
+      "environment_variable": "VERIFICATION_CDN_ORIGIN",
+      "value_type": "https_origin",
+      "required": false,
+      "sensitive": false,
+      "on_missing": "remove_target_and_dependents"
+    },
+    "cdn_check_path": {
+      "environment_variable": "VERIFICATION_CDN_CHECK_PATH",
+      "value_type": "relative_request_path",
+      "required": false,
+      "required_when_binding_present": "cdn_origin",
+      "sensitive": false
+    },
+    "cdn_version_path": {
+      "environment_variable": "VERIFICATION_CDN_VERSION_PATH",
+      "value_type": "relative_request_path",
+      "required": false,
+      "required_when_binding_present": "cdn_origin",
+      "sensitive": false
+    },
+    "cdn_version_header": {
+      "environment_variable": "VERIFICATION_CDN_VERSION_HEADER",
+      "value_type": "http_header_name",
+      "required": false,
+      "required_when_binding_present": "cdn_origin",
+      "sensitive": false
+    }
+  },
+  "template": {
+    "schema_version": 2,
+    "provenance": {
+      "mode": "github_release_required",
+      "release_asset_name": {
+        "binding": "release_asset_name_template"
+      }
+    },
+    "environment": {
+      "name": {
+        "binding": "target_environment"
+      },
+      "targets": {
+        "primary": {
+          "base_url": {
+            "binding": "primary_origin"
+          },
+          "basic_auth": false
+        },
+        "cdn": {
+          "include_when_binding_present": "cdn_origin",
+          "base_url": {
+            "binding": "cdn_origin"
+          },
+          "basic_auth": false
+        }
+      },
+      "allowed_redirects": [],
+      "checks": [
+        {
+          "id": "primary-public",
+          "target": "primary",
+          "type": "page",
+          "path": {
+            "binding": "primary_check_path"
+          },
+          "method": "GET",
+          "expected_status": 200,
+          "required": true,
+          "fatal_signatures": true,
+          "required_text": [
+            {
+              "binding": "primary_public_marker"
+            }
+          ],
+          "forbidden_text": []
+        },
+        {
+          "id": "cdn-public",
+          "include_when_binding_present": "cdn_origin",
+          "target": "cdn",
+          "type": "asset",
+          "path": {
+            "binding": "cdn_check_path"
+          },
+          "method": "HEAD",
+          "expected_status": 200,
+          "required": true,
+          "fatal_signatures": false,
+          "required_text": [],
+          "forbidden_text": []
+        }
+      ],
+      "version_sources": [
+        {
+          "id": "primary-version",
+          "target": "primary",
+          "type": "response_header",
+          "path": {
+            "binding": "primary_version_path"
+          },
+          "required": true,
+          "header_name": {
+            "binding": "primary_version_header"
+          }
+        },
+        {
+          "id": "cdn-version",
+          "include_when_binding_present": "cdn_origin",
+          "target": "cdn",
+          "type": "response_header",
+          "path": {
+            "binding": "cdn_version_path"
+          },
+          "required": true,
+          "header_name": {
+            "binding": "cdn_version_header"
+          }
+        }
+      ]
+    },
+    "limits": {
+      "max_attempts": 3,
+      "consecutive_successes": 2,
+      "incident_repeat_count": 2,
+      "max_requests_per_attempt": 10,
+      "max_total_requests": 30,
+      "request_concurrency": 2,
+      "request_timeout_ms": 10000,
+      "phase_timeout_ms": 360000,
+      "evidence_reserve_ms": 30000,
+      "retry_delay_ms": 1000,
+      "max_redirect_hops": 3,
+      "max_response_headers": 64,
+      "max_header_bytes": 32768,
+      "max_body_bytes": 1048576,
+      "max_artifact_bytes": 262144
+    }
+  }
+}

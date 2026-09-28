@@ -4,7 +4,7 @@ Tags: custom-post-type, acf, mergers-acquisitions, business-listings, elementor,
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.3
-Stable tag: 1.3.2
+Stable tag: 1.4.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -36,7 +36,7 @@ Highlights:
 == Installation ==
 
 1. Install and activate Advanced Custom Fields.
-2. Upload and activate this exact 1.3.1 plugin folder or its matching ZIP package. Do not mix files from another release.
+2. Upload and activate the complete 1.4.0 plugin folder or its matching ZIP package. Do not mix files from another release.
 3. Go to Business Listings → Integrations.
 4. In Amelia, enable the API feature and generate an API key. Amelia documents this feature as Elite-only.
 5. Save the key once. Prefer the server constant `HAL_BL_AMELIA_API_KEY` in production; otherwise the key is stored in a non-autoloaded WordPress option and is displayed only as a fixed mask after saving.
@@ -93,6 +93,13 @@ The widget shows a featured image only when the listing has one and `Public visu
 Only users with the `manage_hal_bl_sensitive_data` capability, which is initially granted to Administrators.
 
 == Changelog ==
+
+= 1.4.0 =
+* Replaced the classic Gallery and Confidential Seller meta boxes with an approved three-section listing editor template on the native editing screen.
+* Public contact data (phone, email, website) now uses the approved dedicated meta keys, registered with the WordPress REST schema and an authorization callback, and edited through the ACF public-contact field group.
+* Preserved all existing public field contracts, templates, Elementor widgets, WPML configuration, and retained data during uninstall and deactivation.
+* Adopted the independent verification workflow for release checks.
+* Uninstall still retains listings, gallery data, taxonomies, and seller metadata; only plugin-owned options, transients, scheduled events, and capabilities are removed.
 
 = 1.3.2 =
 * Release-engineering bump to validate the GitHub Releases update cycle end-to-end. No functional changes.

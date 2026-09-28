@@ -206,11 +206,31 @@ function hal_bl_grant_administrator_capabilities(): void {
 		return;
 	}
 
+	// Classify every candidate capability at its first grant by this
+	// plugin: a name already on the role pre-dated HAL and is protected
+	// from uninstall cleanup; a name absent here is introduced by this
+	// grant and recorded for removal. Classifications never change after
+	// their first entry.
+	$ledger = (array) get_option( 'hal_bl_capabilities_ledger', array() );
+	$seller_capability = (string) hal_bl_seller_field_capability();
+	$candidates = array_merge( hal_bl_listing_capabilities(), array( $seller_capability ) );
+	$dirty = false;
+	foreach ( $candidates as $candidate ) {
+		if ( array_key_exists( $candidate, $ledger ) ) {
+			continue;
+		}
+		$ledger[ $candidate ] = array_key_exists( $candidate, $administrator->capabilities ) ? 'pre_existing' : 'granted';
+		$dirty = true;
+	}
+	if ( $dirty ) {
+		update_option( 'hal_bl_capabilities_ledger', $ledger, false );
+	}
+
 	foreach ( hal_bl_listing_capabilities() as $capability ) {
 		$administrator->add_cap( $capability );
 	}
 
-	$administrator->add_cap( hal_bl_seller_field_capability() );
+	$administrator->add_cap( $seller_capability );
 }
 
 /** Keep integration secrets and diagnostic state out of WordPress autoload. */
@@ -483,6 +503,8 @@ function hal_bl_on_activate( bool $network_wide ): void {
 
 function hal_bl_deactivate_site(): void {
 	wp_clear_scheduled_hook( HAL_BL_AMELIA_SYNC_HOOK );
+	delete_transient( HAL_BL_AMELIA_CATALOG_TRANSIENT );
+	delete_transient( HAL_BL_AMELIA_ERROR_TRANSIENT );
 	flush_rewrite_rules();
 }
 
@@ -517,7 +539,7 @@ function hal_bl_register_acf_fields(): void {
 	acf_add_local_field_group(
 		array(
 			'key'      => 'group_business_listing_public',
-			'title'    => 'Listing Details',
+			'title'    => __( 'Basic business information', 'hal-business-listings' ),
 			'fields'   => array(
 
 				array(
@@ -678,72 +700,83 @@ function hal_bl_register_acf_fields(): void {
 		)
 	);
 
+	// Card C3 — Section 2 of the approved editor IA: public contact data.
+	// Field names ARE the Task 4A approved meta keys (single canonical store,
+	// REST-registered by class-hal-bl-editor.php) — never seller data.
+	acf_add_local_field_group(
+		array(
+			'key'      => 'group_business_listing_public_contact',
+			'title'    => __( 'Public contact information', 'hal-business-listings' ),
+			'fields'   => array(
+				array(
+					'key'   => 'field_bl_public_phone',
+					'label' => __( 'Public phone', 'hal-business-listings' ),
+					'name'  => '_hal_bl_public_phone',
+					'type'  => 'text',
+				),
+				array(
+					'key'   => 'field_bl_public_email',
+					'label' => __( 'Public email', 'hal-business-listings' ),
+					'name'  => '_hal_bl_public_email',
+					'type'  => 'email',
+				),
+				array(
+					'key'   => 'field_bl_public_website',
+					'label' => __( 'Public website', 'hal-business-listings' ),
+					'name'  => '_hal_bl_public_website',
+					'type'  => 'url',
+				),
+			),
+			'location' => array(
+				array(
+					array(
+						'param'    => 'post_type',
+						'operator' => '==',
+						'value'    => 'business_listing',
+					),
+				),
+			),
+			'position'     => 'acf_after_title',
+			'style'        => 'default',
+			'label_placement' => 'top',
+			'show_in_rest' => false,
+		)
+	);
+
 }
 add_action( 'acf/init', 'hal_bl_register_acf_fields' );
 
+/**
+ * Data-contract sanitization (plan §4, public phone): the stored value is a
+ * phone-like string — digits with +, spaces, dashes, parentheses and dots —
+ * never free text, and never on the confidential seller phone keys.
+ */
+function hal_bl_sanitize_phone_like( $value ): string {
+	$clean = preg_replace( '/[^0-9+()\-\s.]/', '', (string) $value );
+	return is_string( $clean ) ? trim( preg_replace( '/\s{2,}/', ' ', $clean ) ) : '';
+}
 
 /**
- * 3) Native Gallery Meta Box لـ business_listing (بدون ACF Pro)
- * -----------------------------------------------------------
- * بديل مباشر لحقل ACF Gallery (حصري لـ Pro)، مبني بالكامل على
- * واجهة مكتبة الوسائط الأساسية في ووردبريس (wp.media). مقيّد
- * بشاشة تحرير business_listing بس — بدون أي أثر على الواجهة
- * الأمامية أو أي شاشة إدارة تانية.
+ * ACF canvas save path for the public phone field: the REST contract in
+ * class-hal-bl-editor.php applies the same sanitizer to REST writes, so
+ * both write paths store a phone-like string for _hal_bl_public_phone.
  */
-function hal_bl_add_gallery_meta_box(): void {
-	add_meta_box(
-		'hal_bl_gallery',
-		__( 'Company Gallery', 'hal-business-listings' ),
-		'hal_bl_render_gallery_meta_box',
-		'business_listing',
-		'side',
-		'high'
-	);
-}
-add_action( 'add_meta_boxes_business_listing', 'hal_bl_add_gallery_meta_box' );
-
-function hal_bl_enqueue_gallery_assets( string $hook ): void {
-	if ( ! in_array( $hook, array( 'post.php', 'post-new.php' ), true ) ) {
-		return;
+function hal_bl_sanitize_public_phone_acf( $value, $post_id, $field ) {
+	if ( empty( $field['key'] ) || 'field_bl_public_phone' !== $field['key'] ) {
+		return $value;
 	}
 
-	$screen = get_current_screen();
-	if ( ! $screen || 'business_listing' !== $screen->post_type ) {
-		return;
-	}
-
-	wp_enqueue_media();
-	wp_enqueue_script(
-		'hal-business-listings-admin-gallery',
-		plugin_dir_url( HAL_BL_FILE ) . 'assets/js/admin-gallery.js',
-		array( 'jquery', 'jquery-ui-sortable' ),
-		is_readable( plugin_dir_path( HAL_BL_FILE ) . 'assets/js/admin-gallery.js' ) ? (string) filemtime( plugin_dir_path( HAL_BL_FILE ) . 'assets/js/admin-gallery.js' ) : HAL_BL_VERSION,
-		true
-	);
-	wp_localize_script( 'hal-business-listings-admin-gallery', 'halBlGallery', array( 'title' => __( 'Select Images', 'hal-business-listings' ) ) );
+	return hal_bl_sanitize_phone_like( $value );
 }
-add_action( 'admin_enqueue_scripts', 'hal_bl_enqueue_gallery_assets' );
+add_filter( 'acf/update_value', 'hal_bl_sanitize_public_phone_acf', 10, 3 );
 
-function hal_bl_render_gallery_meta_box( WP_Post $post ): void {
-	wp_nonce_field( 'hal_bl_save_gallery', 'hal_bl_gallery_nonce' );
 
-	$ids = get_post_meta( $post->ID, 'company_gallery', true );
-	$ids = is_array( $ids ) ? $ids : array();
-	?>
-	<ul id="hal-bl-gallery-list" style="display:flex;flex-wrap:wrap;gap:8px;padding:0;margin:0 0 12px;">
-		<?php foreach ( $ids as $id ) : ?>
-			<li data-id="<?php echo esc_attr( $id ); ?>" style="list-style:none;position:relative;cursor:move;">
-				<?php echo wp_get_attachment_image( $id, 'thumbnail' ); ?>
-				<button type="button" class="hal-bl-remove-image button-link" style="position:absolute;top:0;right:0;background:#fff;">&times;</button>
-			</li>
-		<?php endforeach; ?>
-	</ul>
-	<input type="hidden" name="company_gallery_ids" id="hal-bl-gallery-ids" value="<?php echo esc_attr( implode( ',', $ids ) ); ?>" />
-	<button type="button" class="button" id="hal-bl-add-images"><?php esc_html_e( 'Add Images', 'hal-business-listings' ); ?></button>
-	<?php
-}
-
-// الحفظ: nonce + صلاحية + استبعاد autosave، ثم تنقية والتحقق من كل رقم فعليًا
+/**
+ * 3) Company Gallery — Card C3: the classic side meta-box presentation is
+ * retired. The replacement editor panel (admin-editor.js + editor class)
+ * owns selection; storage (`company_gallery`) and its secure save path
+ * below remain the single canonical channel, unchanged.
+ */
 function hal_bl_save_gallery( int $post_id ): void {
 	$nonce = isset( $_POST['hal_bl_gallery_nonce'] ) ? sanitize_text_field( wp_unslash( $_POST['hal_bl_gallery_nonce'] ) ) : '';
 
@@ -916,68 +949,12 @@ add_action( 'admin_post_hal_bl_apply_visual_policy', 'hal_bl_handle_visual_polic
 
 
 /**
- * 4) حماية فعلية لحقول بيانات البائع — مش بس تسمية "Internal"
- * -----------------------------------------------------------
- * تمنع فعليًا أي مستخدم لا يملك الصلاحية المحددة (افتراضيًا
- * manage_options، قابلة للتغيير بفلتر hal_bl_seller_field_capability)
- * من رؤية أو تعديل بيانات البائع الشخصية، بما في ذلك عنوان
- * التبويب نفسه، لا الحقول الثلاثة فقط.
- *
- * ملحوظة: ده بيحمي شاشة الأدمن. المسؤولية على من سيبني قالب
- * الواجهة الأمامية أن يستخدم hal_get_public_listing_fields()
- * تحت، مش get_fields() الخام.
+ * 4) Confidential seller data — Card C3: the classic side meta-box
+ * presentation is retired. The restricted panel in the replacement editor
+ * owns display (capability-gated boot data via class-hal-bl-editor.php);
+ * storage (the three protected meta keys) and the secure save path below
+ * remain the single canonical channel, unchanged.
  */
-/**
- * 5) Helper آمن للقالب الأمامي — Whitelist فقط
- * -----------------------------------------------------------
- * استخدم الدالة دي في قالب صفحة الشركة بدل get_fields() الخام.
- * بترجع بس الحقول المُصرّح بعرضها للزوار، ومستحيل تسرّب بيانات
- * البائع حتى لو حد نسي أو غيّر القالب لاحقًا.
- */
-/**
- * Confidential seller data is deliberately stored under protected meta keys,
- * outside ACF and outside the native Custom Fields panel.
- */
-function hal_bl_add_sensitive_meta_box(): void {
-	if ( ! current_user_can( hal_bl_seller_field_capability() ) ) {
-		return;
-	}
-
-	add_meta_box(
-		'hal_bl_sensitive_seller_data',
-		__( 'Confidential Seller Information', 'hal-business-listings' ),
-		'hal_bl_render_sensitive_meta_box',
-		'business_listing',
-		'side',
-		'high'
-	);
-}
-add_action( 'add_meta_boxes_business_listing', 'hal_bl_add_sensitive_meta_box' );
-
-function hal_bl_render_sensitive_meta_box( WP_Post $post ): void {
-	if ( ! current_user_can( hal_bl_seller_field_capability() ) ) {
-		return;
-	}
-
-	wp_nonce_field( 'hal_bl_save_sensitive_seller_data', 'hal_bl_sensitive_seller_nonce' );
-	$name  = get_post_meta( $post->ID, '_hal_bl_seller_contact_name', true );
-	$phone = get_post_meta( $post->ID, '_hal_bl_seller_contact_phone', true );
-	$email = get_post_meta( $post->ID, '_hal_bl_seller_contact_email', true );
-	?>
-	<p>
-		<label for="hal-bl-seller-contact-name"><strong><?php esc_html_e( 'Seller Contact Name', 'hal-business-listings' ); ?></strong></label><br />
-		<input class="widefat" id="hal-bl-seller-contact-name" name="hal_bl_seller_contact_name" type="text" value="<?php echo esc_attr( $name ); ?>" autocomplete="off" />
-	</p>
-	<p>
-		<label for="hal-bl-seller-contact-phone"><strong><?php esc_html_e( 'Seller Contact Phone', 'hal-business-listings' ); ?></strong></label><br />
-		<input class="widefat" id="hal-bl-seller-contact-phone" name="hal_bl_seller_contact_phone" type="tel" value="<?php echo esc_attr( $phone ); ?>" autocomplete="off" />
-	</p>
-	<p>
-		<label for="hal-bl-seller-contact-email"><strong><?php esc_html_e( 'Seller Contact Email', 'hal-business-listings' ); ?></strong></label><br />
-		<input class="widefat" id="hal-bl-seller-contact-email" name="hal_bl_seller_contact_email" type="email" value="<?php echo esc_attr( $email ); ?>" autocomplete="off" />
-	</p>
-	<?php
-}
 
 function hal_bl_save_sensitive_seller_data( int $post_id ): void {
 	$nonce = isset( $_POST['hal_bl_sensitive_seller_nonce'] ) ? sanitize_text_field( wp_unslash( $_POST['hal_bl_sensitive_seller_nonce'] ) ) : '';
